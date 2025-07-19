@@ -19,7 +19,12 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "seed": "ts-node prisma/seed.ts",
-    "repl": "ts-node src/repl/repl.ts"
+    "repl": "ts-node src/repl/repl.ts",
+    "dev": "concurrently --config concurrently.config.js --names \"api,studio,generate\" \"yarn start:dev\" \"yarn prisma dev\" \"yarn prisma studio\"",
+    "dev:full": "concurrently --config concurrently.config.js --names \"api,studio,generate,db\" \"yarn start:dev\" \"yarn prisma studio\" \"yarn prisma generate --watch\" \"yarn prisma db push --watch\"",
+    "studio": "prisma studio",
+    "db:push": "prisma db push",
+    "db:generate": "prisma generate"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
@@ -50,6 +55,7 @@
     "@types/jest": "^29.5.14",
     "@types/node": "^22.10.7",
     "@types/supertest": "^6.0.2",
+    "concurrently": "^9.2.0",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-prettier": "^5.2.2",

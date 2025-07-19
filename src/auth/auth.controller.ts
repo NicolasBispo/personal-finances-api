@@ -33,10 +33,8 @@ export class AuthController {
 
   @Post('login')
   async login(@Body() loginDto: LoginDto, @Res() res: Response): Promise<void> {
-    console.log('loginDto', loginDto);
     const user = await this.authService.login(loginDto);
     const token = this.authService.generateToken(user.id);
-    console.log('retornando user', user);
     res
       .status(HttpStatus.OK)
       .header('Authorization', `Bearer ${token}`)

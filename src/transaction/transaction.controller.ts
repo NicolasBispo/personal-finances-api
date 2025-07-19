@@ -58,7 +58,6 @@ export class TransactionController {
     @CurrentUser() user: AuthResponseDto,
     @Query() filters: TransactionFiltersDto,
   ) {
-    console.log('filters', filters);
     const processedFilters: {
       type?: TransactionType | TransactionType[];
       status?: TransactionStatus;
@@ -78,7 +77,6 @@ export class TransactionController {
     if (filters.endDueDate)
       processedFilters.endDueDate = new Date(filters.endDueDate);
 
-    console.log('processedFilters', processedFilters);
     return this.transactionService.getTransactionsByUser(
       user.id,
       processedFilters,

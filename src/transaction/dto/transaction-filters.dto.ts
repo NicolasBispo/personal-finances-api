@@ -5,14 +5,10 @@ import { TransactionType, TransactionStatus } from '@prisma/client';
 export class TransactionFiltersDto {
   @IsOptional()
   @Transform(({ value }: { value: string }) => {
-    console.log('value inicial', value);
     if (typeof value === 'string' && value.includes(',')) {
-      console.log('value dentro do if', value);
       const result = value.split(',').map((t: string) => t.trim());
-      console.log('result', result);
       return result;
     }
-    console.log('value fora do if', value);
     return value;
   })
   type?: TransactionType | TransactionType[];
