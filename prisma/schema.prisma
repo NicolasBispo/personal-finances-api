@@ -1,0 +1,74 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @seed="ts-node prisma/seed.ts"
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(uuid())
+  name         String
+  email        String        @unique
+  password     String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  transactions Transaction[]
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+  RECURRING
+  INSTALLMENT
+}
+
+enum TransactionStatus {
+  PENDING // Para despesas e parcelas que ainda não foram pagas
+  PAID // Para despesas e parcelas que foram pagas
+  RECEIVED // Para receitas que foram recebidas
+  COMPLETED // Para transferências e recorrentes que foram processadas
+  CANCELLED // Para qualquer transação cancelada
+}
+
+model Transaction {
+  id            String            @id @default(uuid())
+  amountInCents Int
+  date          DateTime // Data planejada/esperada
+  dueDate       DateTime? // Data de vencimento (opcional)
+  description   String
+  type          TransactionType
+  status        TransactionStatus @default(PENDING)
+  dateOccurred  DateTime? // Data real quando aconteceu (renomeado de dateOccured)
+  userId        String
+  user          User              @relation(fields: [userId], references: [id])
+
+  // Campos específicos para parcelas
+  installmentNumber   Int? // Número da parcela atual
+  totalInstallments   Int? // Total de parcelas
+  parentTransactionId String? // ID da transação pai (para parcelas)
+  parentTransaction   Transaction?  @relation("InstallmentParent", fields: [parentTransactionId], references: [id])
+  installments        Transaction[] @relation("InstallmentParent")
+
+  // Campos específicos para recorrentes
+  recurrencePattern String? // "monthly", "weekly", "yearly"
+  nextOccurrence    DateTime? // Próxima ocorrência
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, type])
+  @@index([userId, status])
+  @@index([userId, date])
+  @@index([userId, dueDate])
+}
