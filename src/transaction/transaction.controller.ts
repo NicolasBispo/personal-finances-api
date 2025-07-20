@@ -7,12 +7,13 @@ import {
   Param,
   Query,
   UseGuards,
+  NotFoundException,
 } from '@nestjs/common';
 import {
   TransactionService,
   UpdateTransactionStatusDto,
 } from './transaction.service';
-import { TransactionType, TransactionStatus } from '../core/prisma';
+import { TransactionType, TransactionStatus } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { AuthResponseDto } from '../auth/dto';
@@ -166,5 +167,22 @@ export class TransactionController {
     summary.balance = summary.totalIncome - summary.totalExpenses;
 
     return summary;
+  }
+
+  @Get(':id')
+  async getTransactionById(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthResponseDto,
+  ) {
+    const transaction = await this.transactionService.getTransactionById(
+      id,
+      user.id,
+    );
+
+    if (!transaction) {
+      throw new NotFoundException('Transaction not found');
+    }
+
+    return transaction;
   }
 }

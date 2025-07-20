@@ -85,6 +85,7 @@ export class TransactionService {
     const updatePayload: {
       status: TransactionStatus;
       dateOccurred?: Date;
+      nextOccurrence?: Date;
     } = {
       status: updateData.status,
     };
@@ -97,6 +98,17 @@ export class TransactionService {
     // Se for uma parcela, verificar se todas as parcelas foram pagas
     if (transaction.type === 'INSTALLMENT' && updateData.status === 'PAID') {
       await this.checkInstallmentCompletion(transaction);
+    }
+
+    // Se for uma transação recorrente completada, calcular próxima ocorrência
+    if (transaction.type === 'RECURRING' && updateData.status === 'COMPLETED') {
+      if (transaction.recurrencePattern) {
+        const nextOccurrence = this.calculateNextOccurrence(
+          new Date(transaction.date),
+          transaction.recurrencePattern,
+        );
+        updatePayload.nextOccurrence = nextOccurrence;
+      }
     }
 
     return await this.prisma.transaction.update({
@@ -140,8 +152,30 @@ export class TransactionService {
       orderBy: { date: 'desc' },
     });
 
-    // Filtrar transações parceladas para mostrar apenas as parcelas do mês atual
-    return this.filterInstallmentTransactionsByCurrentMonth(transactions);
+    // Filtrar transações parceladas considerando os filtros de data
+    let filteredTransactions = this.filterInstallmentTransactionsByDateRange(
+      transactions,
+      filters,
+    );
+
+    // Se estamos buscando transações recorrentes e há filtros de data, gerar ocorrências virtuais
+    const shouldGenerateRecurring =
+      filters?.type === 'RECURRING' ||
+      (Array.isArray(filters?.type) && filters?.type.includes('RECURRING'));
+
+    if (shouldGenerateRecurring && (filters?.startDate || filters?.endDate)) {
+      const recurringTransactions = await this.generateRecurringOccurrences(
+        userId,
+        filters.startDate,
+        filters.endDate,
+      );
+      filteredTransactions = [
+        ...filteredTransactions,
+        ...recurringTransactions,
+      ];
+    }
+
+    return filteredTransactions;
   }
 
   async getOverdueTransactions(userId: string): Promise<Transaction[]> {
@@ -170,6 +204,26 @@ export class TransactionService {
 
     // Filtrar transações parceladas para mostrar apenas as parcelas
     return this.filterInstallmentTransactions(transactions);
+  }
+
+  async getTransactionById(
+    id: string,
+    userId: string,
+  ): Promise<Transaction | null> {
+    return this.prisma.transaction.findFirst({
+      where: {
+        id,
+        userId,
+      },
+      include: {
+        installments: {
+          orderBy: {
+            installmentNumber: 'asc',
+          },
+        },
+        parentTransaction: true,
+      },
+    });
   }
 
   async getUpcomingDueTransactions(
@@ -242,7 +296,7 @@ export class TransactionService {
             'Recurring transactions must have a recurrence pattern',
           );
         }
-        if (!['monthly', 'weekly', 'yearly'].includes(data.recurrencePattern)) {
+        if (!['MONTHLY', 'WEEKLY', 'YEARLY'].includes(data.recurrencePattern)) {
           throw new BadRequestException('Invalid recurrence pattern');
         }
         break;
@@ -313,8 +367,9 @@ export class TransactionService {
     });
   }
 
-  private filterInstallmentTransactionsByCurrentMonth(
+  private filterInstallmentTransactionsByDateRange(
     transactions: Transaction[],
+    filters?: TransactionFilters,
   ): Transaction[] {
     return transactions.filter((transaction) => {
       // Se for uma transação pai de parcelas, não incluir
@@ -325,18 +380,34 @@ export class TransactionService {
         return false;
       }
 
-      // Se for uma parcela, verificar se é do mês atual
+      // Se for uma parcela, verificar se está dentro do período filtrado
       if (
         transaction.type === 'INSTALLMENT' &&
         transaction.parentTransactionId
       ) {
-        const currentDate = new Date();
         const transactionDate = new Date(transaction.date);
 
-        return (
-          transactionDate.getMonth() === currentDate.getMonth() &&
-          transactionDate.getFullYear() === currentDate.getFullYear()
-        );
+        // Se não há filtros de data, incluir todas as parcelas
+        if (!filters?.startDate && !filters?.endDate) {
+          return true;
+        }
+
+        // Verificar se a data da parcela está dentro do período filtrado
+        if (filters?.startDate) {
+          const startDate = new Date(filters.startDate);
+          if (transactionDate < startDate) {
+            return false;
+          }
+        }
+
+        if (filters?.endDate) {
+          const endDate = new Date(filters.endDate);
+          if (transactionDate > endDate) {
+            return false;
+          }
+        }
+
+        return true;
       }
 
       // Para outros tipos de transação, incluir normalmente
@@ -438,13 +509,13 @@ export class TransactionService {
     const next = new Date(date);
 
     switch (pattern) {
-      case 'weekly':
+      case 'WEEKLY':
         next.setDate(next.getDate() + 7);
         break;
-      case 'monthly':
+      case 'MONTHLY':
         next.setMonth(next.getMonth() + 1);
         break;
-      case 'yearly':
+      case 'YEARLY':
         next.setFullYear(next.getFullYear() + 1);
         break;
     }
@@ -469,5 +540,91 @@ export class TransactionService {
         data: { status: 'PAID' },
       });
     }
+  }
+
+  private async generateRecurringOccurrences(
+    userId: string,
+    startDate?: Date,
+    endDate?: Date,
+  ): Promise<Transaction[]> {
+    // Buscar todas as transações recorrentes ativas do usuário
+    const recurringTransactions = await this.prisma.transaction.findMany({
+      where: {
+        userId,
+        type: 'RECURRING',
+        status: {
+          in: ['PENDING', 'COMPLETED'],
+        },
+        recurrencePattern: {
+          not: null,
+        },
+      },
+    });
+
+    const virtualTransactions: Transaction[] = [];
+
+    for (const recurring of recurringTransactions) {
+      if (!recurring.recurrencePattern) continue;
+
+      let currentDate = new Date(recurring.date);
+      const endLimit =
+        endDate || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000); // 1 ano no futuro
+
+      // Gerar ocorrências até o limite de data
+      while (currentDate <= endLimit) {
+        // Se há filtro de data inicial, pular ocorrências antes dessa data
+        if (startDate && currentDate < startDate) {
+          currentDate = this.calculateNextOccurrence(
+            currentDate,
+            recurring.recurrencePattern,
+          );
+          continue;
+        }
+
+        // Se há filtro de data final, parar se passou dessa data
+        if (endDate && currentDate > endDate) {
+          break;
+        }
+
+        // Verificar se já existe uma transação real para esta data
+        const existingTransaction = await this.prisma.transaction.findFirst({
+          where: {
+            userId,
+            type: 'RECURRING',
+            date: currentDate,
+            description: recurring.description,
+            amountInCents: recurring.amountInCents,
+          },
+        });
+
+        // Se não existe transação real para esta data, criar virtual
+        if (!existingTransaction) {
+          // Criar transação virtual
+          const virtualTransaction: Transaction = {
+            ...recurring,
+            id: `${recurring.id}_${currentDate.getTime()}`, // ID único para a ocorrência
+            date: currentDate,
+            dueDate: recurring.dueDate
+              ? this.calculateNextOccurrence(
+                  currentDate,
+                  recurring.recurrencePattern,
+                )
+              : null,
+            status: 'PENDING' as TransactionStatus,
+            dateOccurred: null,
+          };
+
+          virtualTransactions.push(virtualTransaction);
+        }
+
+        // Calcular próxima ocorrência
+        currentDate = this.calculateNextOccurrence(
+          currentDate,
+          recurring.recurrencePattern,
+        );
+      }
+    }
+
+    return virtualTransactions;
   }
 }
