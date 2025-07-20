@@ -6,6 +6,7 @@ import {
   Transaction,
   Prisma,
 } from '@prisma/client';
+import { UpdateTransactionRequest } from './dto/update-transaction.dto';
 
 // Interface para o service (com Dates)
 export interface CreateTransactionServiceData {
@@ -109,6 +110,105 @@ export class TransactionService {
         );
         updatePayload.nextOccurrence = nextOccurrence;
       }
+    }
+
+    return await this.prisma.transaction.update({
+      where: { id: transactionId },
+      data: updatePayload,
+    });
+  }
+
+  async updateTransaction(
+    transactionId: string,
+    userId: string,
+    updateData: UpdateTransactionRequest,
+  ): Promise<Transaction> {
+    const transaction = await this.prisma.transaction.findFirst({
+      where: { id: transactionId, userId },
+    });
+
+    if (!transaction) {
+      throw new BadRequestException('Transaction not found');
+    }
+
+    // Preparar dados para atualização
+    const updatePayload: Prisma.TransactionUpdateInput = {};
+
+    if (updateData.amountInCents !== undefined) {
+      updatePayload.amountInCents = updateData.amountInCents;
+    }
+
+    if (updateData.date !== undefined) {
+      updatePayload.date = new Date(updateData.date);
+    }
+
+    if (updateData.dueDate !== undefined) {
+      updatePayload.dueDate = updateData.dueDate
+        ? new Date(updateData.dueDate)
+        : undefined;
+    }
+
+    if (updateData.description !== undefined) {
+      updatePayload.description = updateData.description;
+    }
+
+    if (updateData.type !== undefined) {
+      // Validar se o novo tipo é válido
+      const validationData: CreateTransactionServiceData = {
+        amountInCents: updateData.amountInCents ?? transaction.amountInCents,
+        date: updateData.date ? new Date(updateData.date) : transaction.date,
+        dueDate: updateData.dueDate
+          ? new Date(updateData.dueDate)
+          : (transaction.dueDate ?? undefined),
+        description: updateData.description ?? transaction.description,
+        type: updateData.type,
+        totalInstallments: updateData.totalInstallments,
+        recurrencePattern: updateData.recurrencePattern,
+        userId,
+      };
+      this.validateTransactionByType(validationData);
+      updatePayload.type = updateData.type;
+    }
+
+    if (updateData.status !== undefined) {
+      // Validar se o novo status é válido para o tipo
+      this.validateStatusUpdate(
+        updateData.type || transaction.type,
+        updateData.status,
+      );
+      updatePayload.status = updateData.status;
+
+      // Para transações que foram processadas, definir dateOccurred
+      if (this.shouldSetDateOccurred(updateData.status)) {
+        updatePayload.dateOccurred = new Date();
+      }
+
+      // Se for uma parcela, verificar se todas as parcelas foram pagas
+      if (transaction.type === 'INSTALLMENT' && updateData.status === 'PAID') {
+        await this.checkInstallmentCompletion(transaction);
+      }
+
+      // Se for uma transação recorrente completada, calcular próxima ocorrência
+      if (
+        transaction.type === 'RECURRING' &&
+        updateData.status === 'COMPLETED'
+      ) {
+        if (transaction.recurrencePattern) {
+          const nextOccurrence = this.calculateNextOccurrence(
+            new Date(transaction.date),
+            transaction.recurrencePattern,
+          );
+          updatePayload.nextOccurrence = nextOccurrence;
+        }
+      }
+    }
+
+    if (updateData.totalInstallments !== undefined) {
+      updatePayload.totalInstallments = updateData.totalInstallments;
+    }
+
+    if (updateData.recurrencePattern !== undefined) {
+      updatePayload.recurrencePattern = updateData.recurrencePattern;
     }
 
     return await this.prisma.transaction.update({

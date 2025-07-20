@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards,
   NotFoundException,
+  Patch,
 } from '@nestjs/common';
 import {
   TransactionService,
@@ -18,6 +19,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { AuthResponseDto } from '../auth/dto';
 import { TransactionFiltersDto, CreateTransactionRequest } from './dto';
+import { UpdateTransactionDto } from './dto';
 
 @Controller('transactions')
 @UseGuards(JwtAuthGuard)
@@ -52,6 +54,24 @@ export class TransactionController {
       user.id,
       updateData,
     );
+  }
+
+  @Put(':id')
+  async replaceTransaction(
+    @Param('id') id: string,
+    @Body() updateData: UpdateTransactionDto,
+    @CurrentUser() user: AuthResponseDto,
+  ) {
+    return this.transactionService.updateTransaction(id, user.id, updateData);
+  }
+
+  @Patch(':id')
+  async updateTransaction(
+    @Param('id') id: string,
+    @Body() updateData: UpdateTransactionDto,
+    @CurrentUser() user: AuthResponseDto,
+  ) {
+    return this.transactionService.updateTransaction(id, user.id, updateData);
   }
 
   @Get()

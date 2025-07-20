@@ -42,4 +42,21 @@ export class InstallmentService {
       },
     });
   }
-} 
+
+  async deleteInstallment(id: string, userId: string) {
+    await this.prisma.transaction.delete({
+      where: {
+        id,
+        userId,
+      },
+    });
+
+    await this.prisma.transaction.deleteMany({
+      where: {
+        parentTransactionId: id,
+      },
+    });
+
+    return;
+  }
+}

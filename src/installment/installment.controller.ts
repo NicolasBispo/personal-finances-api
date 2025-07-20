@@ -5,6 +5,7 @@ import {
   UseGuards,
   BadRequestException,
   NotFoundException,
+  Delete,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -62,5 +63,13 @@ export class InstallmentController {
     }
 
     return this.installmentService.getInstallmentChildren(id, user.id);
+  }
+
+  @Delete(':id')
+  async deleteInstallment(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthResponseDto,
+  ) {
+    return this.installmentService.deleteInstallment(id, user.id);
   }
 }
